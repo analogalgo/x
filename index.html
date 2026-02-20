@@ -123,12 +123,16 @@
             return cards.reverse();  // FIXED ORDER - now Mercury first, Neptune last
         }
 
+        // Parse "YYYY-MM-DD" as local date (avoids UTC timezone shift)
+        function parseLocalDate(str) {
+            const [y, m, d] = str.split('-').map(Number);
+            return new Date(y, m - 1, d);
+        }
+
         // Birth card via solar value formula (Olney Richmond, 1893)
         // solar_value = 55 - (month * 2 + day)
         function getBirthCard(birthStr) {
-            const date = new Date(birthStr);
-            const m = date.getMonth() + 1;
-            const d = date.getDate();
+            const [, m, d] = birthStr.split('-').map(Number);
             const solarValue = 55 - (m * 2 + d);
             if (solarValue <= 0) return "Joker";
             const suits = ['♥', '♣', '♦', '♠'];
@@ -147,8 +151,8 @@
             const birthCard = getBirthCard(birthStr);
             if (birthCard === "Joker") return alert("Joker - no reading");
 
-            const birthDate = new Date(birthStr);
-            const targetDate = new Date(targetStr);
+            const birthDate = parseLocalDate(birthStr);
+            const targetDate = parseLocalDate(targetStr);
 
             let spreadNum, activeCard, planetLabel, extraInfo, seven;
 
