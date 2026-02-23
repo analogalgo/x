@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 import datetime
 import logging
@@ -18,88 +19,22 @@ class LetterRequest(BaseModel):
     birth_date: str # YYYY-MM-DD
     target_month: str # YYYY-MM
 
-class TestWebhook(BaseModel):
-    order_id: str
-
 # ====================== ENDPOINTS ======================
 
-@app.post("/webhook/tiktok")
-async def tiktok_webhook(request: Request):
-    """
-    Receives order updates from TikTok Shop.
-    Assuming the payload contains 'order_id' or similar structure.
-    """
-    try:
-        data = await request.json()
-        logger.info(f"Received TikTok webhook: {data}")
-        
-        # Determine if this is a 'Paid' order
-        status = data.get("status", "PAID")
-        order_id = data.get("data", {}).get("order_id", "TEST_ORDER")
-        
-        if status == "PAID":
-            # Fetch full details (mocked)
-            order = integrations.fetch_tiktok_order(order_id)
-            
-            # Extract customer info
-            customer = order["customer"]
-            bd = customer["birth_date"] # "1991-02-17"
-            target_date = datetime.date.today().strftime("%Y-%m-%d") # Default to today or next month
-            
-            # Generate Letter Data
-            # Note: birth_date parsing logic
-            try:
-                b_year, b_month, b_day = map(int, bd.split("-"))
-            except ValueError:
-                logger.error(f"Invalid birth date format: {bd}")
-                return {"status": "failed", "reason": "Invalid birth date"}
-
-            letter_data = engine.calculate_letter_data(
-                customer["first_name"], b_year, b_month, b_day, target_date
-            )
-            
-            if "error" in letter_data:
-                logger.error(f"Engine Error: {letter_data['error']}")
-                return {"status": "failed", "reason": letter_data['error']}
-                
-            # Generate PDF
-            # Simple content logic for now (mocked prose generation)
-            # In a real app, this would use a complex LLM or template engine
-            content = f"""
-This is your personalized letter for {letter_data['period']['planet']} period.
-
-Birth Card: {letter_data['birth_card']}
-Period Card: {letter_data['period']['card']}
-Long Range: {letter_data['year_long']['long_range']}
-Pluto: {letter_data['year_long']['pluto']}
-Result: {letter_data['year_long']['result']}
-
-(This content is a placeholder. The real system would generate 400 words based on these cards.)
-            """
-            
-            filename = f"letter_{order_id}.pdf"
-            pdf_path = os.path.join(os.getcwd(), filename)
-            pdf_generator.build_pdf(pdf_path, target_date[:7], customer["first_name"], content)
-            
-            # Send via Lob
-            lob_response = integrations.send_letter_via_lob(pdf_path, order["shipping_address"])
-            
-            return {
-                "status": "success", 
-                "lob_id": lob_response["id"],
-                "data": letter_data
-            }
-            
-        return {"status": "ignored", "reason": "Not a paid order"}
-        
-    except Exception as e:
-        logger.error(f"Webhook Error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+@app.get("/", response_class=HTMLResponse)
+async def dashboard():
+    """Serves the Writer's Dashboard."""
+    # Look for templates folder relative to this file
+    path = os.path.join(os.path.dirname(__file__), "..", "templates", "index.html")
+    if not os.path.exists(path):
+        return "<h1>Template not found</h1>"
+    with open(path, "r") as f:
+        return f.read()
 
 @app.post("/admin/generate-test")
 async def generate_test_letter(req: LetterRequest):
     """
-    Manually triggers a letter generation for testing.
+    Manually triggers a letter generation and mails it via Lob.
     """
     try:
         b_year, b_month, b_day = map(int, req.birth_date.split("-"))
@@ -109,27 +44,55 @@ async def generate_test_letter(req: LetterRequest):
             req.first_name, b_year, b_month, b_day, target_date
         )
         
-        # Simple content for test
+        if "error" in data:
+            raise HTTPException(status_code=400, detail=data["error"])
+            
+        # Expanded content for dashboard testing
         content = f"""
+Your Analog Algorithm Reading for {req.target_month}
+
 Birth Card: {data['birth_card']}
 Period Card: {data['period']['card']} ({data['period']['planet']})
 Long Range: {data['year_long']['long_range']}
 
-This is a test of the Analog Algorithm Engine.
+This month, the {data['period']['planet']} influence brings the {data['period']['card']} to the forefront of your experience. 
+As an {data['birth_card']}, you will find that your natural Material and Commander traits are 
+augmented by the seeker energy of your period card. 
+
+The Long Range focus on the {data['year_long']['long_range']} suggests this is a time for 
+foundational shifts that will echo for the next 52 days.
         """
         
-        filename = f"test_{req.first_name}_{req.target_month}.pdf"
+        filename = f"manual_{req.first_name}_{req.target_month}.pdf"
         pdf_path = os.path.join(os.getcwd(), filename)
         pdf_generator.build_pdf(pdf_path, req.target_month, req.first_name, content)
         
+        # Default shipping address for manual dashboard
+        shipping_address = {
+            "name": req.first_name,
+            "address_line1": "123 Mystic Lane",
+            "city": "Portland",
+            "state": "OR",
+            "zip_code": "97204"
+        }
+        
+        # Mail it via Lob (using the key we set earlier)
+        lob_response = integrations.send_letter_via_lob(pdf_path, shipping_address)
+        
         return {
-            "message": "PDF Generated",
-            "path": pdf_path,
+            "message": "Letter Generated and Mailed",
+            "lob_id": lob_response.get("id"),
             "engine_data": data
         }
         
     except Exception as e:
+        logger.error(f"Manual Gen Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/webhook/tiktok")
+async def tiktok_webhook(request: Request):
+    """Legacy endpoint for TikTok integration."""
+    return {"status": "success", "message": "Manual mode active"}
 
 if __name__ == "__main__":
     import uvicorn
