@@ -12,6 +12,9 @@ app = FastAPI(title="Analog Algorithm Engine", version="1.0.0")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Base directory for the project
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 # ====================== DATA MODELS ======================
 
 class LetterRequest(BaseModel):
@@ -24,12 +27,15 @@ class LetterRequest(BaseModel):
 @app.get("/", response_class=HTMLResponse)
 async def dashboard():
     """Serves the Writer's Dashboard."""
-    # Look for templates folder relative to this file
-    path = os.path.join(os.path.dirname(__file__), "..", "templates", "index.html")
-    if not os.path.exists(path):
-        return "<h1>Template not found</h1>"
-    with open(path, "r") as f:
-        return f.read()
+    template_path = os.path.join(BASE_DIR, "templates", "dashboard.html")
+    logger.info(f"Serving dashboard from: {template_path}")
+    
+    if not os.path.exists(template_path):
+        logger.error(f"Template not found: {template_path}")
+        return HTMLResponse(content="<h1>Writer's Dashboard Template Not Found</h1>", status_code=404)
+        
+    with open(template_path, "r") as f:
+        return HTMLResponse(content=f.read())
 
 @app.post("/admin/generate-test")
 async def generate_test_letter(req: LetterRequest):
@@ -47,27 +53,23 @@ async def generate_test_letter(req: LetterRequest):
         if "error" in data:
             raise HTTPException(status_code=400, detail=data["error"])
             
-        # Expanded content for dashboard testing
+        # Simplified content logic for manual generation
         content = f"""
-Your Analog Algorithm Reading for {req.target_month}
+Personalized Analysis for {req.first_name}
+Target: {req.target_month}
 
-Birth Card: {data['birth_card']}
-Period Card: {data['period']['card']} ({data['period']['planet']})
-Long Range: {data['year_long']['long_range']}
+Your Birth Card is the {data['birth_card']}.
+In this {data['period']['planet']} period, your primary card is the {data['period']['card']}.
 
-This month, the {data['period']['planet']} influence brings the {data['period']['card']} to the forefront of your experience. 
-As an {data['birth_card']}, you will find that your natural Material and Commander traits are 
-augmented by the seeker energy of your period card. 
-
-The Long Range focus on the {data['year_long']['long_range']} suggests this is a time for 
-foundational shifts that will echo for the next 52 days.
+This cycle emphasizes material stability and the pursuit of your higher purpose.
+Your Long Range card ({data['year_long']['long_range']}) suggests a theme of transition.
         """
         
         filename = f"manual_{req.first_name}_{req.target_month}.pdf"
         pdf_path = os.path.join(os.getcwd(), filename)
         pdf_generator.build_pdf(pdf_path, req.target_month, req.first_name, content)
         
-        # Default shipping address for manual dashboard
+        # Default shipping address
         shipping_address = {
             "name": req.first_name,
             "address_line1": "123 Mystic Lane",
@@ -76,7 +78,7 @@ foundational shifts that will echo for the next 52 days.
             "zip_code": "97204"
         }
         
-        # Mail it via Lob (using the key we set earlier)
+        # Attempt to mail via Lob
         lob_response = integrations.send_letter_via_lob(pdf_path, shipping_address)
         
         return {
@@ -91,9 +93,8 @@ foundational shifts that will echo for the next 52 days.
 
 @app.post("/webhook/tiktok")
 async def tiktok_webhook(request: Request):
-    """Legacy endpoint for TikTok integration."""
-    return {"status": "success", "message": "Manual mode active"}
+    return {"status": "success", "mode": "manual_active"}
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
